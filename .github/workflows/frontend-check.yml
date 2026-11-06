@@ -1,0 +1,32 @@
+name: frontend-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: install dependencies
+        run: |
+          cd frontend
+          npm ci --no-audit
+
+      - name: eslint
+        run: |
+          cd frontend
+          npx eslint "App/**/*.{ts,tsx}"
+      - name: typecheck
+        run: |
+          cd frontend
+          npx tsc --noEmit

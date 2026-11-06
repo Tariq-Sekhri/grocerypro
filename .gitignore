@@ -1,0 +1,59 @@
+
+backend/between
+backend/db design.png
+backend/.env
+/backend/node_modules
+/backend/src/logs
+backend/tables.txt
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+flow1.drawio
+
+setup on server.txt
+frontend/.env
+frontendold/.env
+frontend/App/.env
+.geopro/
+frontend/ios/
+app-release.aab
+gha-creds-*.json
+
+
+# Personal Food Basics catalog and favourites import (local only)
+backend/data/food-basics-*
+backend/scripts/import-food-basics*.cjs
+backend/scripts/setup-keep-favorites.cjs

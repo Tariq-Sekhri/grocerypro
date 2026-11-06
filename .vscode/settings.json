@@ -1,0 +1,31 @@
+{
+    "files.exclude": {
+        "backend/.env": false,
+        "backend/.gitignore": false,
+        "backend/eslint.config.mjs": false,
+        "backend/logs": false,
+        "backend/src/utils": false,
+        "todo.txt": false,
+        "tables.txt": false,
+        "setup on server.txt": false,
+   
+        "README.md": false,
+        "info.txt": false,
+        "fakeData.txt": false,
+        ".gitattributes": false,
+        ".gitignore": false,
+        "frontend/.expo": false,
+        "frontend/node_modules": false,
+        "frontend/index.ts": true,
+        "frontend/app.json": false,
+        "frontend/app.config.ts": false,
+        "frontend/.gitignore": false,
+        "frontend/package-lock.json": false,
+        "shared": false,
+        "frontend/assets": false
+    },
+    "search.exclude": {
+        "**/node_modules": false
+    },
+    "omnisharp.projectFilesExcludePattern": ""
+}

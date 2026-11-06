@@ -1,0 +1,47 @@
+name: backend-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          npm ci --no-audit
+
+      - name: Generate Prisma Client
+        run: |
+          cd backend
+          npx prisma generate
+
+      - name: Run TypeScript type check
+        run: |
+          cd backend
+          npx tsc --noEmit
+
+      - name: Run ESLint
+        run: |
+          cd backend
+          npx eslint 'src/**/*.ts'
+
+      - name: Run app to confirm it starts
+        run: |
+          cd backend
+          npx prisma generate
+          npm start &
+          sleep 5
+          pkill -f "node"

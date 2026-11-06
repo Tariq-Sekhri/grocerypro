@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+  output="../../shared/prisma-types"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model location {
+  location_id   Int             @id @default(autoincrement())
+  name          String?         @db.VarChar(255)
+  address       String?         @db.VarChar(255)
+  item          item[]
+  shopping_list shopping_list[]
+  store_section store_section[]
+}
+
+model item {
+  item_id            Int                  @id @default(autoincrement())
+  name               String?              @db.VarChar(255)
+  image_path         String?              @db.VarChar(255)
+  section_id         Int?
+  location_id        Int?
+  location           location?            @relation(fields: [location_id], references: [location_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_item_location")
+  store_section      store_section?       @relation(fields: [section_id], references: [section_id], onUpdate: NoAction, map: "fk_item_section")
+  item_in_list       item_in_list[]
+  item_price_history item_price_history[]
+  item_favorite      item_favorite[]
+
+  @@index([location_id], map: "fk_item_location")
+  @@index([section_id], map: "fk_item_section")
+}
+
+model item_in_list {
+  item_in_list_id  Int            @id @default(autoincrement())
+  item_id          Int?
+  shopping_list_id Int?
+  buyer_id         Int?
+  quantity         Int?
+  discount_price   Int?
+  status_id        Int?
+  user             user?          @relation(fields: [buyer_id], references: [user_id], onUpdate: NoAction, map: "fk_item_in_list_buyer")
+  item             item?          @relation(fields: [item_id], references: [item_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_item_in_list_item")
+  shopping_list    shopping_list? @relation(fields: [shopping_list_id], references: [shopping_list_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_item_in_list_list")
+  item_status      item_status?   @relation(fields: [status_id], references: [status_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_item_in_list_status")
+
+  @@index([buyer_id], map: "fk_item_in_list_buyer")
+  @@index([item_id], map: "fk_item_in_list_item")
+  @@index([shopping_list_id], map: "fk_item_in_list_list")
+  @@index([status_id], map: "fk_item_in_list_status")
+}
+
+model item_price_history {
+  item_price_history_id Int       @id @default(autoincrement())
+  item_id               Int?
+  price                 Int?
+  effective_date        DateTime? @db.Timestamp(0)
+  item                  item?     @relation(fields: [item_id], references: [item_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_item_price_history_item")
+
+  @@index([item_id], map: "fk_item_price_history_item")
+}
+
+model item_status {
+  status_id    Int            @id @default(autoincrement())
+  name         String?        @unique(map: "name") @db.VarChar(50)
+  item_in_list item_in_list[]
+}
+
+model item_favorite {
+  user_id Int
+  item_id Int
+  user    user @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  item    item @relation(fields: [item_id], references: [item_id], onDelete: Cascade)
+
+  @@id([user_id, item_id])
+  @@index([item_id])
+}
+
+model shopping_list {
+  shopping_list_id Int            @id @default(autoincrement())
+  location_id      Int?
+  paid             Boolean?       @default(false)
+  completed_at     DateTime?      @db.Timestamp(0)
+  item_in_list     item_in_list[]
+  location         location?      @relation(fields: [location_id], references: [location_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_shopping_list_location")
+
+  @@index([location_id], map: "fk_shopping_list_location")
+}
+
+model store_section {
+  section_id  Int       @id @default(autoincrement())
+  location_id Int?
+  name        String?   @db.VarChar(255)
+  sort_order  Int?
+  item        item[]
+  location    location? @relation(fields: [location_id], references: [location_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_store_section_location")
+
+  @@index([location_id], map: "fk_store_section_location")
+}
+
+model user {
+  user_id      Int            @id @default(autoincrement())
+  name         String?        @db.VarChar(255)
+  role         String         @default("member") @db.VarChar(20)
+  auth_key     String?        @db.VarChar(255)
+  item_in_list item_in_list[]
+  item_favorite item_favorite[]
+}

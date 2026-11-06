@@ -1,0 +1,101 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Frontend",
+      "type": "shell",
+      "command": "cd frontend && npm start",
+      "group": "none",
+      "presentation": {
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Run Backend",
+      "type": "shell",
+      "command": "cd backend && npm start",
+      "group": "none",
+      "presentation": {
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Run All",
+      "dependsOn": ["Run Backend", "Run Frontend"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Type Check Backend (GitHub Actions)",
+      "type": "shell",
+      "command": "npx tsc --noEmit",
+      "options": {
+        "cwd": "backend"
+      },
+      "group": "test"
+    },
+    {
+      "label": "Lint Backend (GitHub Actions)",
+      "type": "shell",
+      "command": "npx eslint src/**/*.ts",
+      "options": {
+        "cwd": "backend"
+      },
+      "group": "test"
+    },
+    {
+      "label": "Start Backend Check",
+      "type": "shell",
+      "command": "npm run check",
+      "options": {
+        "cwd": "backend"
+      },
+      "group": "test"
+    },
+    {
+      "label": "Check Backend (GitHub Actions)",
+      "dependsOn": [
+        "Type Check Backend (GitHub Actions)",
+        "Lint Backend (GitHub Actions)",
+        "Start Backend Check"
+      ],
+      "group": "test"
+    },
+    {
+      "label": "Type Check Frontend",
+      "type": "shell",
+      "command": "npx tsc --noEmit",
+      "options": {
+        "cwd": "frontend"
+      },
+      "group": "test"
+    },
+    {
+      "label": "Lint Frontend",
+      "type": "shell",
+      "command": "npx eslint **/*.{ts,tsx} --no-warn-ignored",
+      "options": {
+        "cwd": "frontend"
+      },
+      "group": "test"
+    },
+    {
+      "label": "Test Frontend",
+      "dependsOn": ["Lint Frontend", "Type Check Frontend"],
+      "group": "test"
+    },
+    {
+      "label": "Test All (GitHub Actions)",
+      "dependsOn": ["Check Backend (GitHub Actions)", "Test Frontend"],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    }
+  ]
+}

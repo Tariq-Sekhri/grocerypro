@@ -1,0 +1,3 @@
+//[nodemon] clean exit - waiting for changes before restart
+//run this
+taskkill /F /IM node.exe

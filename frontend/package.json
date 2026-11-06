@@ -1,0 +1,46 @@
+{
+  "name": "grocerypro",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "demo": "node ../scripts/demo.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "postandroid:icons": "node ../scripts/android-icon-layout.mjs",
+    "android:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/android-debug.ps1",
+    "android:icons": "capacitor-assets generate --android --iconBackgroundColor \"#101817\" --iconBackgroundColorDark \"#101817\" --splashBackgroundColor \"#101817\" --splashBackgroundColorDark \"#101817\"",
+    "bump": "node ../scripts/bump.mjs",
+    "mobile:build": "powershell -NoProfile -ExecutionPolicy Bypass -File ../mobile_build.ps1"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.2",
+    "@mdi/js": "^7.4.47",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4",
+    "socket.io-client": "^4.8.4"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.2",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "eslint": "^10.12.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "typescript": "~5.9",
+    "typescript-eslint": "^8.71.0",
+    "vite": "^8.3.2"
+  }
+}

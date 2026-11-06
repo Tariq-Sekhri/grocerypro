@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "es2016",
+    "module": "commonjs",
+    "rootDir": "../",
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "skipLibCheck": true,
+    "baseUrl": "../",                         // ← required for paths to work
+    "paths": {
+      "@shared/*": ["./shared/*"],
+      "@prisma/client": ["./shared/node_modules/@prisma/client"]
+    }
+  },
+  "include": ["src/**/*", "prisma/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
