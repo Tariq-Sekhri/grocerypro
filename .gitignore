@@ -57,3 +57,6 @@ gha-creds-*.json
 backend/data/food-basics-*
 backend/scripts/import-food-basics*.cjs
 backend/scripts/setup-keep-favorites.cjs
+/AGENTS.md
+/CLAUDE.md
+/private/
