@@ -3,16 +3,17 @@ import { App } from "@capacitor/app";
 import { apiOrigin, isNative } from "./server";
 
 /**
- * Problems are recorded on the device even when the server cannot be reached,
- * then uploaded to the server's log folder once it can, and removed from the
- * device after the server stores them. The newest MAX_ENTRIES are kept.
+ * Problems and user activity (see activityLog.ts) are recorded on the device
+ * even when the server cannot be reached, then uploaded to the server's log
+ * folder once it can, and removed from the device after the server stores
+ * them. The newest MAX_ENTRIES are kept.
  */
 export type LogLevel = "info" | "warn" | "error";
 type Entry = { seq: number; time: string; level: LogLevel; event: string; profile?: string; count?: number; last?: string; [key: string]: unknown };
 
 const STORAGE_KEY = "grocerypro.deviceLog";
 const DEVICE_KEY = "grocerypro.deviceId";
-const MAX_ENTRIES = 500;
+const MAX_ENTRIES = 5000;
 const UPLOAD_BATCH = 200;
 
 function readEntries(): Entry[] {
@@ -27,9 +28,17 @@ let seq = entries.reduce((max, entry) => Math.max(max, entry.seq || 0), 0);
 let profile: string | undefined;
 const listeners = new Set<() => void>();
 
-function save() {
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+/** Writes the queue to storage now. Called when the app is hidden so nothing is lost. */
+export function flushLog() {
+  clearTimeout(saveTimer);
+  saveTimer = undefined;
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); }
   catch { entries = entries.slice(-Math.floor(MAX_ENTRIES / 2)); }
+}
+// Activity is logged on every touch; batch the storage writes.
+function save() {
+  saveTimer ??= setTimeout(flushLog, 1000);
   listeners.forEach(listener => listener());
 }
 
@@ -52,12 +61,13 @@ const sameKind = (a: Entry, b: Omit<Entry, "seq" | "time">) =>
 /**
  * Adds an entry. A repeat of one of the last few entries (the same request
  * failing every few seconds during an outage) updates its count instead, so
- * the start of an outage is not pushed out of the log.
+ * the start of an outage is not pushed out of the log. Activity entries pass
+ * merge: false because every touch matters for replaying a session.
  */
-export function logEvent(level: LogLevel, event: string, details: Record<string, unknown> = {}) {
+export function logEvent(level: LogLevel, event: string, details: Record<string, unknown> = {}, { merge = true } = {}) {
   const time = new Date().toISOString();
   const next = { level, event, ...(profile ? { profile } : {}), ...details };
-  const repeat = entries.slice(-6).reverse().find(entry => sameKind(entry, next));
+  const repeat = merge ? entries.slice(-6).reverse().find(entry => sameKind(entry, next)) : undefined;
   if (repeat) {
     entries = entries.filter(entry => entry !== repeat);
     entries.push({ ...repeat, seq: ++seq, count: (repeat.count ?? 1) + 1, last: time });

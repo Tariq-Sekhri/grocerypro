@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { App } from "@capacitor/app";
 import { isNative } from "./server";
+import { logActivity } from "./activityLog";
 
 type BackHandler = () => void;
 const handlers: BackHandler[] = [];
@@ -25,6 +26,7 @@ export function setRootBackHandler(handler: BackHandler | null) { fallback = han
 if (isNative) {
   void App.addListener("backButton", () => {
     const top = handlers[handlers.length - 1];
+    logActivity("back-button", { action: handlers.length ? "close-overlay" : fallback ? "navigate" : "exit" });
     if (top) top();
     else if (fallback) fallback();
     else void App.exitApp();

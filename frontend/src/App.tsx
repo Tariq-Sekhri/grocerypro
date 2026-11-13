@@ -16,6 +16,7 @@ import { useNavigationPreload } from "./lib/navigationPreload";
 import { useItemImageSync } from "./lib/itemImages";
 import { startConnectionMonitor, useConnectionCheckOpen } from "./lib/connection";
 import { logEvent, setLogProfile, startDeviceLog } from "./lib/deviceLog";
+import { logScreen, startActivityLog } from "./lib/activityLog";
 import { ConnectionCheck } from "./components/Connection";
 
 export default function App() {
@@ -34,8 +35,10 @@ function Shell() {
   const checkOpen = useConnectionCheckOpen();
   const serverKey = server ? server.mode + originFor(server) : null;
 
-  useEffect(() => { startDeviceLog(); logEvent("info", "app-start"); }, []);
+  useEffect(() => { startDeviceLog(); startActivityLog(); logEvent("info", "app-start"); }, []);
   useEffect(() => { setLogProfile(profile?.name); }, [profile]);
+  const view = !server ? (detecting ? "finding-server" : "server-settings") : serverOpen ? "server-settings" : !profile || location.pathname === "/profiles" ? "profile-picker" : undefined;
+  useEffect(() => { logScreen([view, checkOpen && "connection-check"].filter(Boolean).join(", ") || undefined); }, [location.pathname, location.search, location.hash, view, checkOpen]);
   // Each server gets a fresh check; the monitor reads the current server on every check.
   useEffect(() => {
     if (!serverKey) return;

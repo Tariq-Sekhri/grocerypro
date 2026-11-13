@@ -155,15 +155,19 @@ export function ChoiceField({ label, value, options, onChange, compact, dropdown
   </>;
 }
 
-export function ConfirmAction({ open, title, description, onCancel, onConfirm, busy }: { open: boolean; title: string; description: string; onCancel: () => void; onConfirm: () => void; busy: boolean }) {
+export function ConfirmAction({ open, title, description, onCancel, onConfirm, busy, confirmLabel = "Remove", busyLabel = "Removing...", cancelLabel = "Keep it", variant = "danger", large = false, icon }: {
+  open: boolean; title: string; description: string; onCancel: () => void; onConfirm: () => void; busy: boolean;
+  confirmLabel?: string; busyLabel?: string; cancelLabel?: string; variant?: ButtonVariant; large?: boolean; icon?: ReactNode;
+}) {
   useBackHandler(() => { if (!busy) onCancel(); }, open);
   if (!open) return null;
   return <div className="overlay overlay-center" onClick={() => { if (!busy) onCancel(); }}>
-    <div className="dialog" role="alertdialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()}>
+    <div className={`dialog${large ? " dialog-large" : ""}`} role="alertdialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()}>
+      {icon && <div className="dialog-icon">{icon}</div>}
       <h2 className="dialog-title">{title}</h2>
       <p className="dialog-description">{description}</p>
-      <Button variant="danger" disabled={busy} onClick={onConfirm}>{busy ? "Removing..." : "Remove"}</Button>
-      <Button disabled={busy} onClick={onCancel} className="mt-12">Keep it</Button>
+      <Button variant={variant} disabled={busy} onClick={onConfirm}>{busy ? busyLabel : confirmLabel}</Button>
+      <Button variant={variant === "danger" ? "primary" : "secondary"} disabled={busy} onClick={onCancel} className="mt-12">{cancelLabel}</Button>
     </div>
   </div>;
 }

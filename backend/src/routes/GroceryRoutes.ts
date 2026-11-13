@@ -153,7 +153,8 @@ router.get("/listEntries/:id", async (req, res) => {
 });
 router.patch("/listEntries/:id/status", async (req, res) => {
   const id = idSchema.safeParse(req.params.id);
-  if (!id.success) { fail(res, "Invalid list item."); return; }
+  const requested = z.enum(["in_cart", "not_in_cart", "not_found"]).optional().safeParse((req.body as { status?: unknown } | undefined)?.status);
+  if (!id.success || !requested.success) { fail(res, "Invalid list item."); return; }
   const entry = await prisma.item_in_list.findUnique({ where: { item_in_list_id: id.data }, include: { shopping_list: true, item_status: true } });
   if (!entry) { fail(res, "This item is no longer on the list.", 404); return; }
   if (entry.shopping_list?.completed_at) { fail(res, "Completed lists cannot be changed.", 409); return; }
@@ -162,14 +163,29 @@ router.patch("/listEntries/:id/status", async (req, res) => {
     await lockShoppingList(tx, entry.shopping_list_id!);
     const current = await tx.item_in_list.findUniqueOrThrow({ where: { item_in_list_id: id.data }, include: { shopping_list: true, item_status: true } });
     if (current.shopping_list?.completed_at) return null;
-    const nextStatus = current.item_status?.name === "in_cart" ? "not_in_cart" : "in_cart";
+    // An explicit status sets it (not_found = not available); no body toggles in/out of the cart, as older app versions send.
+    const nextStatus = requested.data ?? (current.item_status?.name === "in_cart" ? "not_in_cart" : "in_cart");
     const status = await tx.item_status.findUniqueOrThrow({ where: { name: nextStatus } });
     const result = await tx.item_in_list.update({ where: { item_in_list_id: id.data }, data: { status_id: status.status_id } });
-    await completeShoppingList(tx, entry.shopping_list_id!);
+    // Older app versions toggle without a body and have no finish button, so they still finish automatically.
+    // Current versions ask the user to confirm and call POST /locations/:id/shoppingList/complete.
+    if (!requested.data) await completeShoppingList(tx, entry.shopping_list_id!);
     return result;
   });
   if (!updated) { fail(res, "Completed lists cannot be changed.", 409); return; }
   res.json(updated);
+});
+router.post("/locations/:id/shoppingList/complete", async (req, res) => {
+  const id = idSchema.safeParse(req.params.id);
+  if (!id.success) { fail(res, "Invalid store."); return; }
+  const list = await prisma.shopping_list.findFirst({ where: { location_id: id.data, completed_at: null }, orderBy: { shopping_list_id: "desc" } });
+  if (!list) { fail(res, "This trip is already finished.", 409); return; }
+  const completed = await prisma.$transaction(async tx => {
+    await lockShoppingList(tx, list.shopping_list_id);
+    return completeShoppingList(tx, list.shopping_list_id);
+  });
+  if (!completed) { fail(res, "Some items are still to get.", 409); return; }
+  res.json(completed);
 });
 router.patch("/listEntries/:id/aisle", async (req, res) => {
   const id = idSchema.safeParse(req.params.id), parsed = z.object({ section_id: idSchema.nullable() }).safeParse(req.body);

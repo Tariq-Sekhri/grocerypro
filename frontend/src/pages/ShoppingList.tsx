@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { mdiCheck, mdiCircleOutline, mdiHistory, mdiMinus, mdiPencilOutline, mdiPlus, mdiTrashCanOutline } from "@mdi/js";
+import { mdiCancel, mdiCheck, mdiCheckAll, mdiCircleOutline, mdiDotsVertical, mdiHistory, mdiMinus, mdiPencilOutline, mdiPlus, mdiTrashCanOutline } from "@mdi/js";
 import { ITEM_STATUS } from "@shared/constants/itemStatus";
 import Icon from "../components/Icon";
 import { ItemThumb } from "../components/ItemImage";
 import Page from "../components/Page";
-import { Button, ChoiceField, InlineError, ScreenState } from "../components/ui";
+import { Button, ChoiceField, ConfirmAction, InlineError, ScreenState } from "../components/ui";
 import { colors } from "../theme";
 import useScreenData from "../lib/useScreenData";
-import { useGoBack } from "../lib/navigation";
+import { useBackHandler, useGoBack } from "../lib/navigation";
 import { api, errorMessage } from "../lib/api";
 import { inBackground } from "../lib/optimistic";
 import { defaultFilters, listChoices, loadFilters, saveFilters, type FlattenedShoppingListItem, type ListFilters, type location } from "../lib/grocery";
@@ -34,23 +34,53 @@ export function ShoppingList() {
   const items = data ?? [];
   const { buyers, sections } = listChoices(items);
   const visible = items.filter(i => (filters.buyer === "all" || String(i.buyer_id ?? "none") === filters.buyer)
-    && (filters.section === "all" || String(i.section_id ?? "none") === filters.section))
-    .sort((a, b) => Number(a.status_name === ITEM_STATUS.IN_CART) - Number(b.status_name === ITEM_STATUS.IN_CART));
+    && (filters.section === "all" || String(i.section_id ?? "none") === filters.section));
+  // One row per item; still-to-get first, then not available, then in the cart.
+  const rows = groupByItem(visible).sort((a, b) => statusOrder(groupStatus(a.map(i => i.status_name))) - statusOrder(groupStatus(b.map(i => i.status_name))));
   const filtered = filters.buyer !== "all" || filters.section !== "all";
+  // Everything bought or not available (and something bought): ask before finishing the trip.
+  const allDone = items.some(i => i.status_name === ITEM_STATUS.IN_CART) && groupStatus(items.map(i => i.status_name)) !== ITEM_STATUS.NOT_IN_CART;
+  const [finishOpen, setFinishOpen] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [finishError, setFinishError] = useState<string | null>(null);
+  // Opens when the list becomes done; after "Not yet" it waits until the list changes and is done again.
+  useEffect(() => { setFinishOpen(allDone); }, [allDone]);
+  async function finishTrip() {
+    setFinishing(true); setFinishError(null);
+    try {
+      await api.post(`/locations/${locationId}/shoppingList/complete`, {});
+      setFinishOpen(false);
+      reload();
+    } catch (error) { setFinishError(errorMessage(error)); setFinishOpen(false); }
+    finally { setFinishing(false); }
+  }
   const clear = () => setFilters(defaultFilters);
   const openAddItems = () => navigate(`/locations/${locationId}/add`);
   return <Page title={storeName ?? "Shopping list"} back="/" headerClassName="shopping-list-page-header"
     rightAction={<Link className="icon-button shopping-list-history" to={`/locations/${locationId}/history`} aria-label="View list history" title="History"><Icon path={mdiHistory} size={22} color={colors.primary} /></Link>}
-    footer={<Button preloadTo={`/locations/${locationId}/add`} onClick={openAddItems}><Icon path={mdiPlus} size={22} color={colors.background} /> Add items</Button>}>
+    footer={allDone
+      ? <div className="list-footer-actions">
+          <Button variant="secondary" preloadTo={`/locations/${locationId}/add`} onClick={openAddItems}><Icon path={mdiPlus} size={22} color={colors.primary} /> Add items</Button>
+          <Button onClick={() => setFinishOpen(true)}><Icon path={mdiCheckAll} size={22} color={colors.background} /> Finish trip</Button>
+        </div>
+      : <Button preloadTo={`/locations/${locationId}/add`} onClick={openAddItems}><Icon path={mdiPlus} size={22} color={colors.background} /> Add items</Button>}>
     <ChipRow label="Buyer" value={filters.buyer} onChange={buyer => setFilters({ ...filters, buyer })} options={[{ value: "all", label: "Everyone" }, ...buyers]} />
     <ChipRow label="Aisle" value={filters.section} onChange={section => setFilters({ ...filters, section })} options={[{ value: "all", label: "All aisles" }, ...sections]} />
-    <InlineError message={error} />
+    <InlineError message={error ?? finishError} />
     {!visible.length && <ScreenState loading={loading && !data} title={error ? "Couldn't load your list" : filtered ? "No matching items" : "List empty"}
       description={error ?? (filtered ? "Clear filters to see all items." : undefined)}
       action={error ? "Try again" : filtered ? "Clear filters" : undefined} onAction={error ? reload : filtered ? clear : undefined} />}
-    {visible.map(item => <ListRow key={item.item_in_list_id} item={item} locationId={locationId}
+    {rows.map(entries => <ListRow key={entries[0].item_id ?? entries[0].item_in_list_id} entries={entries} locationId={locationId}
       aisles={[...(aisleData ?? []), ...addedAisles.filter(added => !aisleData?.some(existing => existing.section_id === added.section_id))]}
       onAisleCreated={section => setAddedAisles(current => [...current.filter(s => s.section_id !== section.section_id), section])} />)}
+    <ConfirmAction open={finishOpen} busy={finishing} large variant="primary"
+      icon={<Icon path={mdiCheckAll} size={40} color={colors.primary} />}
+      title="Finish this trip?"
+      description={items.some(i => i.status_name === ITEM_STATUS.NOT_FOUND)
+        ? "Everything is in the cart or not available. Not-available items move to the next list."
+        : "Everything is in the cart. The list moves to history."}
+      confirmLabel="Yes, finish trip" busyLabel="Finishing..." cancelLabel="Not yet"
+      onConfirm={() => void finishTrip()} onCancel={() => setFinishOpen(false)} />
   </Page>;
 }
 
@@ -65,89 +95,146 @@ function ChipRow({ label, value, options, onChange }: { label: string; value: st
 function StatusIcon({ status }: { status: string | null | undefined }) {
   switch (status) {
     case ITEM_STATUS.IN_CART: return <Icon path={mdiCheck} size={18} color={colors.disabled} label="In cart" />;
-    case ITEM_STATUS.NOT_FOUND: return <Icon path={mdiMinus} size={18} color={colors.danger} label="Not found" />;
+    case ITEM_STATUS.NOT_FOUND: return <Icon path={mdiCancel} size={18} color={colors.danger} label="Not available" />;
     default: return <Icon path={mdiCircleOutline} size={20} color={colors.primary} label="Not in cart" />;
   }
 }
 
-function ListRow({ item, locationId, aisles, onAisleCreated }: { item: FlattenedShoppingListItem; locationId: number; aisles: store_section[]; onAisleCreated: (section: store_section) => void }) {
-  const [quantityOpen, setQuantityOpen] = useState(false);
-  const [quantity, setQuantity] = useState(item.quantity ?? 1);
-  const [removed, setRemoved] = useState(false);
-  const [aisleOpen, setAisleOpen] = useState(false);
-  const [newAisle, setNewAisle] = useState("");
-  const [aisleBusy, setAisleBusy] = useState(false);
-  const [aisleError, setAisleError] = useState<string | null>(null);
-  const [aisleName, setAisleName] = useState(item.section_name ?? "No aisle");
-  const [aisleId, setAisleId] = useState<number | null>(item.section_id ?? null);
-  const aislePickerRef = useRef<HTMLSpanElement>(null);
-  const [inCart, setInCart] = useState(item.status_name === ITEM_STATUS.IN_CART);
-  const statusName = inCart ? ITEM_STATUS.IN_CART : item.status_name === ITEM_STATUS.IN_CART ? ITEM_STATUS.NOT_IN_CART : item.status_name;
-  useEffect(() => { setInCart(item.status_name === ITEM_STATUS.IN_CART); }, [item.status_name]);
-  useEffect(() => { setQuantity(item.quantity ?? 1); }, [item.quantity]);
+/** A row's state from its entries: anything still to get keeps it open; otherwise not available wins over in cart. */
+function groupStatus(statuses: (string | null | undefined)[]) {
+  if (statuses.some(status => status !== ITEM_STATUS.IN_CART && status !== ITEM_STATUS.NOT_FOUND)) return ITEM_STATUS.NOT_IN_CART;
+  return statuses.includes(ITEM_STATUS.NOT_FOUND) ? ITEM_STATUS.NOT_FOUND : ITEM_STATUS.IN_CART;
+}
+const statusOrder = (status: string) => status === ITEM_STATUS.NOT_IN_CART ? 0 : status === ITEM_STATUS.NOT_FOUND ? 1 : 2;
+
+/** Entries of the same item (one per buyer) share a row. */
+function groupByItem(items: FlattenedShoppingListItem[]) {
+  const groups = new Map<number, FlattenedShoppingListItem[]>();
+  for (const item of items) {
+    const key = item.item_id ?? -item.item_in_list_id;
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  return [...groups.values()];
+}
+
+/** Closes a menu anchored in `ref` on an outside press, Escape or Android Back. */
+function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: () => void) {
+  useBackHandler(close, open);
   useEffect(() => {
-    setAisleId(item.section_id ?? null);
-    setAisleName(item.section_name ?? "No aisle");
-  }, [item.section_id, item.section_name]);
-  useEffect(() => {
-    if (!aisleOpen) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (!aislePickerRef.current?.contains(event.target as Node)) setAisleOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setAisleOpen(false); };
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => { if (!ref.current?.contains(event.target as Node)) close(); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [aisleOpen]);
-  function toggleStatus() {
-    const next = !inCart;
-    setInCart(next);
-    inBackground(() => api.patch(`/listEntries/${item.item_in_list_id}/status`, {}), () => setInCart(!next));
+  }, [open, ref, close]);
+}
+
+function ListRow({ entries, locationId, aisles, onAisleCreated }: { entries: FlattenedShoppingListItem[]; locationId: number; aisles: store_section[]; onAisleCreated: (section: store_section) => void }) {
+  const first = entries[0];
+  const name = first.item_name ?? "Item";
+  const merged = entries.length > 1;
+  // Optimistic changes per entry, dropped once the server's values change.
+  const [statuses, setStatuses] = useState<Record<number, string>>({});
+  const [quantities, setQuantities] = useState<Record<number, number>>({});
+  const [removed, setRemoved] = useState(false);
+  const serverState = entries.map(e => `${e.item_in_list_id}:${e.status_name}:${e.quantity}`).join();
+  useEffect(() => { setStatuses({}); setQuantities({}); }, [serverState]);
+  const statusOf = (e: FlattenedShoppingListItem) => statuses[e.item_in_list_id] ?? e.status_name ?? ITEM_STATUS.NOT_IN_CART;
+  const quantityOf = (e: FlattenedShoppingListItem) => quantities[e.item_in_list_id] ?? e.quantity ?? 1;
+  const status = groupStatus(entries.map(statusOf));
+  const inCart = status === ITEM_STATUS.IN_CART, unavailable = status === ITEM_STATUS.NOT_FOUND;
+  const total = entries.reduce((sum, e) => sum + quantityOf(e), 0);
+
+  const [quantityOpen, setQuantityOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  useDismiss(menuOpen, menuRef, closeMenu);
+
+  const [aisleOpen, setAisleOpen] = useState(false);
+  const [newAisle, setNewAisle] = useState("");
+  const [aisleBusy, setAisleBusy] = useState(false);
+  const [aisleError, setAisleError] = useState<string | null>(null);
+  const [aisleName, setAisleName] = useState(first.section_name ?? "No aisle");
+  const [aisleId, setAisleId] = useState<number | null>(first.section_id ?? null);
+  const aislePickerRef = useRef<HTMLSpanElement>(null);
+  const closeAisle = useCallback(() => setAisleOpen(false), []);
+  useDismiss(aisleOpen, aislePickerRef, closeAisle);
+  useEffect(() => {
+    setAisleId(first.section_id ?? null);
+    setAisleName(first.section_name ?? "No aisle");
+  }, [first.section_id, first.section_name]);
+
+  function setStatus(next: string) {
+    setMenuOpen(false);
+    for (const entry of entries) {
+      const previous = statusOf(entry);
+      if (previous === next) continue;
+      const id = entry.item_in_list_id;
+      setStatuses(current => ({ ...current, [id]: next }));
+      inBackground(() => api.patch(`/listEntries/${id}/status`, { status: next }), () => setStatuses(current => ({ ...current, [id]: previous })));
+    }
   }
-  function adjustQuantity(delta: number) {
-    const next = Math.max(1, Math.min(9999, quantity + delta));
-    if (next === quantity) return;
-    const previous = quantity;
-    setQuantity(next);
-    inBackground(() => api.patch(`/listEntries/${item.item_in_list_id}`, {
-      buyer_id: item.buyer_id ?? null, quantity: next, discount_price: item.discount_price ?? null,
-    }), () => setQuantity(previous));
+  // Tapping the status puts everything in the cart, or takes it all back out.
+  const toggleStatus = () => setStatus(inCart ? ITEM_STATUS.NOT_IN_CART : ITEM_STATUS.IN_CART);
+  function adjustQuantity(entry: FlattenedShoppingListItem, delta: number) {
+    const previous = quantityOf(entry), next = Math.max(1, Math.min(9999, previous + delta));
+    if (next === previous) return;
+    const id = entry.item_in_list_id;
+    setQuantities(current => ({ ...current, [id]: next }));
+    inBackground(() => api.patch(`/listEntries/${id}`, {
+      buyer_id: entry.buyer_id ?? null, quantity: next, discount_price: entry.discount_price ?? null,
+    }), () => setQuantities(current => ({ ...current, [id]: previous })));
   }
   function removeFromList() {
+    setMenuOpen(false);
     setRemoved(true);
-    inBackground(() => api.delete(`/listEntries/${item.item_in_list_id}`), () => setRemoved(false));
+    for (const entry of entries) inBackground(() => api.delete(`/listEntries/${entry.item_in_list_id}`), () => setRemoved(false));
   }
   function assignAisle(section: store_section | null) {
     const previous = { id: aisleId, name: aisleName };
     setAisleId(section?.section_id ?? null); setAisleName(section?.name ?? "No aisle"); setAisleOpen(false);
-    inBackground(() => api.patch(`/listEntries/${item.item_in_list_id}/aisle`, { section_id: section?.section_id ?? null }),
+    inBackground(() => api.patch(`/listEntries/${first.item_in_list_id}/aisle`, { section_id: section?.section_id ?? null }),
       () => { setAisleId(previous.id); setAisleName(previous.name); });
   }
   async function createAisle() {
-    const name = newAisle.trim();
-    if (!name || aisleBusy) return;
+    const aisle = newAisle.trim();
+    if (!aisle || aisleBusy) return;
     setAisleBusy(true); setAisleError(null);
     try {
-      const section = await api.post<store_section>(`/locations/${locationId}/sections`, { name });
+      const section = await api.post<store_section>(`/locations/${locationId}/sections`, { name: aisle });
       onAisleCreated(section);
-      await api.patch(`/listEntries/${item.item_in_list_id}/aisle`, { section_id: section.section_id });
-      setAisleId(section.section_id); setAisleName(section.name ?? name); setNewAisle(""); setAisleOpen(false);
+      await api.patch(`/listEntries/${first.item_in_list_id}/aisle`, { section_id: section.section_id });
+      setAisleId(section.section_id); setAisleName(section.name ?? aisle); setNewAisle(""); setAisleOpen(false);
     } catch (error) { setAisleError(errorMessage(error)); }
     finally { setAisleBusy(false); }
   }
   if (removed) return null;
-  return <>
-  <div className={`card list-row${inCart ? " list-row-in-cart" : ""}${aisleOpen ? " aisle-picker-open" : ""}`}>
-    <button type="button" className="status" aria-label={inCart ? `Mark ${item.item_name} not in cart` : `Mark ${item.item_name} in cart`}
-      aria-pressed={inCart} onClick={toggleStatus} title={inCart ? "In cart — tap to undo" : "Mark as in cart"}>
-      <StatusIcon status={statusName} />
+  const buyerName = (e: FlattenedShoppingListItem) => e.buyer_name ?? "Unassigned";
+  const forBuyer = (e: FlattenedShoppingListItem) => merged ? " for " + buyerName(e) : "";
+  const stepper = (entry: FlattenedShoppingListItem, done?: () => void) => <div className="list-quantity-stepper" aria-label={`Quantity ${quantityOf(entry)}`}>
+    <button type="button" className="list-qty-step" aria-label={`Remove one ${name}${forBuyer(entry)}`} disabled={quantityOf(entry) <= 1} onClick={() => adjustQuantity(entry, -1)}>
+      <Icon path={mdiMinus} size={17} color={colors.primary} />
     </button>
-    <ItemThumb path={item.image_path} />
+    {done ? <button type="button" className="list-qty-value" aria-label="Done changing quantity" onClick={done}>{quantityOf(entry)}</button>
+      : <span className="list-qty-value">{quantityOf(entry)}</span>}
+    <button type="button" className="list-qty-step" aria-label={`Add one ${name}${forBuyer(entry)}`} disabled={quantityOf(entry) >= 9999} onClick={() => adjustQuantity(entry, 1)}>
+      <Icon path={mdiPlus} size={17} color={colors.primary} />
+    </button>
+  </div>;
+  const rowClass = ["card list-row", inCart && "list-row-in-cart", unavailable && "list-row-unavailable", (aisleOpen || menuOpen) && "aisle-picker-open", merged && quantityOpen && "list-row-split"].filter(Boolean).join(" ");
+  return <div className={rowClass}>
+    <button type="button" className="status" aria-label={inCart ? `Mark ${name} not in cart` : `Mark ${name} in cart`}
+      aria-pressed={inCart} onClick={toggleStatus} title={inCart ? "In cart — tap to undo" : "Mark as in cart"}>
+      <StatusIcon status={status} />
+    </button>
+    <ItemThumb path={first.image_path} />
     <span className="list-details">
-      <span className="list-name">{item.item_name}</span>
+      <span className="list-name">{name}</span>
       <div className="list-meta"><span className="list-aisle-picker" ref={aislePickerRef}>
         <button type="button" className="list-aisle-trigger" aria-label={`Set aisle, currently ${aisleName}`} aria-expanded={aisleOpen} onClick={() => { setAisleError(null); setAisleOpen(open => !open); }}>{aisleName}</button>
         {aisleOpen && <div className="aisle-picker-menu" aria-label="Choose an aisle">
@@ -163,31 +250,46 @@ function ListRow({ item, locationId, aisles, onAisleCreated }: { item: Flattened
             <Button className="aisle-add-button" disabled={aisleBusy || !newAisle.trim()} onClick={() => void createAisle()}>{aisleBusy ? "Saving..." : "Add new aisle"}</Button>
           </div>
         </div>}
-      </span><span className="list-buyer">{"  ·  "}{item.buyer_name ?? "Unassigned"}</span></div>
+      </span><span className="list-buyer">{"  ·  "}{merged ? entries.map(e => `${buyerName(e)} ${quantityOf(e)}`).join(" | ") : buyerName(first)}</span>
+      {unavailable && <span className="list-unavailable">{"  ·  "}Not available</span>}</div>
     </span>
     <div className="list-quantity-control">
-      {!quantityOpen
-        ? <button type="button" className="quantity quantity-trigger" aria-label={`Change quantity, currently ${quantity}`} aria-expanded="false" onClick={() => setQuantityOpen(true)}>
-            <span className="qty">{quantity}</span><span className="qty-label">QTY</span>
+      {!quantityOpen || merged
+        ? <button type="button" className="quantity quantity-trigger" aria-label={`Change quantity, currently ${total}`} aria-expanded={quantityOpen} onClick={() => setQuantityOpen(open => !open)}>
+            <span className="qty">{total}</span><span className="qty-label">QTY</span>
           </button>
-        : <div className="list-quantity-stepper" aria-label={`Quantity ${quantity}`}>
-            <button type="button" className="list-qty-step" aria-label={`Remove one ${item.item_name}`} disabled={quantity <= 1} onClick={() => adjustQuantity(-1)}>
-              <Icon path={mdiMinus} size={17} color={colors.primary} />
-            </button>
-            <button type="button" className="list-qty-value" aria-label="Done changing quantity" onClick={() => setQuantityOpen(false)}>{quantity}</button>
-            <button type="button" className="list-qty-step" aria-label={`Add one ${item.item_name}`} disabled={quantity >= 9999} onClick={() => adjustQuantity(1)}>
-              <Icon path={mdiPlus} size={17} color={colors.primary} />
-            </button>
-          </div>}
+        : stepper(first, () => setQuantityOpen(false))}
     </div>
-    <Link className="icon-button" to={`/entries/${item.item_in_list_id}`} aria-label={"Edit " + item.item_name}>
-      <Icon path={mdiPencilOutline} size={19} color={colors.muted} />
-    </Link>
-    <button type="button" className="icon-button list-delete-button" aria-label={`Remove ${item.item_name} from list`} title="Remove from list" onClick={removeFromList}>
-      <Icon path={mdiTrashCanOutline} size={19} color={colors.danger} />
-    </button>
-  </div>
-  </>;
+    {merged
+      ? <button type="button" className="icon-button" aria-label={`Edit ${name} for each buyer`} aria-expanded={quantityOpen} onClick={() => setQuantityOpen(open => !open)}>
+          <Icon path={mdiPencilOutline} size={19} color={colors.muted} />
+        </button>
+      : <Link className="icon-button" to={`/entries/${first.item_in_list_id}`} aria-label={"Edit " + name}>
+          <Icon path={mdiPencilOutline} size={19} color={colors.muted} />
+        </Link>}
+    <div className="list-row-menu" ref={menuRef}>
+      <button type="button" className="icon-button" aria-label={`More for ${name}`} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
+        <Icon path={mdiDotsVertical} size={20} color={colors.muted} />
+      </button>
+      {menuOpen && <div className="row-menu" role="menu" aria-label={name}>
+        {unavailable
+          ? <button type="button" role="menuitem" className="aisle-choice" onClick={() => setStatus(ITEM_STATUS.NOT_IN_CART)}>Available again</button>
+          : <button type="button" role="menuitem" className="aisle-choice" onClick={() => setStatus(ITEM_STATUS.NOT_FOUND)}>Not available</button>}
+        <button type="button" role="menuitem" className="aisle-choice row-menu-danger" onClick={removeFromList}>
+          <Icon path={mdiTrashCanOutline} size={18} color={colors.danger} /> Remove from list
+        </button>
+      </div>}
+    </div>
+    {merged && quantityOpen && <div className="list-split" aria-label={`${name} by buyer`}>
+      {entries.map(entry => <div className="list-split-row" key={entry.item_in_list_id}>
+        <span className="list-split-buyer">{buyerName(entry)}</span>
+        {stepper(entry)}
+        <Link className="icon-button" to={`/entries/${entry.item_in_list_id}`} aria-label={`Edit ${name} for ${buyerName(entry)}`}>
+          <Icon path={mdiPencilOutline} size={19} color={colors.muted} />
+        </Link>
+      </div>)}
+    </div>}
+  </div>;
 }
 
 export function ListFiltersPage() {

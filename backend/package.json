@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:setup": "tsx scripts/setup-db.ts",
-    "logs": "node scripts/logs.cjs"
+    "logs": "node scripts/logs.cjs",
+    "replay": "node scripts/replay.cjs"
   },
   "keywords": [],
   "author": "Tariq Sekhri",

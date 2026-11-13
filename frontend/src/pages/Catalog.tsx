@@ -15,6 +15,7 @@ import { useGoBack } from "../lib/navigation";
 import { useProfile } from "../lib/profile";
 import { prepareItemImage, rememberItemImage, useItemImage } from "../lib/itemImages";
 import { isNative } from "../lib/server";
+import { clearAddDraft, selectNewItem, updateAddDraft, useAddDraft } from "../lib/addDraft";
 import { buyerChoices, catalogFavorite, money, parsePrice, priceInput, sortedCatalog, validPrice, type CatalogData, type CatalogItem, type FlattenedShoppingListItem, type ItemData } from "../lib/grocery";
 
 export function AddItemsToList() {
@@ -23,16 +24,16 @@ export function AddItemsToList() {
   const listPath = `/locations/${locationId}/list`;
   const { data, loading, error, reload } = useScreenData<CatalogData>("/catalog?location_id=" + locationId);
   const profile = useProfile();
-  const [search, setSearch] = useState("");
-  const [buyer, setBuyer] = useState(profile ? String(profile.user_id) : "none");
-  const [itemBuyers, setItemBuyers] = useState<Record<number, string>>({});
-  const [selected, setSelected] = useState<Record<number, number>>({});
+  // Planned adds are stored per store, so creating or editing items, leaving the screen or closing the app keeps them.
+  const draft = useAddDraft(locationId);
+  const { search, itemBuyers, selected } = draft;
+  const buyer = draft.buyer ?? (profile ? String(profile.user_id) : "none");
+  const setSearch = (value: string) => updateAddDraft(locationId, d => ({ ...d, search: value }));
+  const setBuyer = (value: string) => updateAddDraft(locationId, d => ({ ...d, buyer: value }));
+  const setItemBuyer = (id: number, value: string) => updateAddDraft(locationId, d => ({ ...d, itemBuyers: { ...d.itemBuyers, [id]: value } }));
   const [favoriteOverrides, setFavoriteOverrides] = useState<Record<string, boolean>>({});
   // Fresh catalog data already reflects saved favourites and removed items.
   useEffect(() => { setFavoriteOverrides({}); }, [data]);
-  useEffect(() => {
-    if (data) setSelected(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => data.items.some(item => item.item_id === Number(id)))));
-  }, [data]);
   const isFavorite = (item: CatalogItem) => catalogFavorite(item, profile?.user_id ?? null, favoriteOverrides);
   function toggleFavorite(item: CatalogItem) {
     if (!profile) return;
@@ -40,11 +41,13 @@ export function AddItemsToList() {
     setFavoriteOverrides(prev => ({ ...prev, [id]: favorite }));
     inBackground(() => api.put("/catalog/" + item.item_id + "/favorite", { user_id, favorite }), () => setFavoriteOverrides(prev => ({ ...prev, [id]: !favorite })));
   }
-  const count = Object.values(selected).reduce((sum, n) => sum + n, 0);
-  const adjust = (id: number, delta: number) => { setSelected(prev => ({ ...prev, [id]: Math.max(0, Math.min(9999, (prev[id] ?? 0) + delta)) })); };
+  // Selections for items not in the loaded catalog (deleted, or just created and not loaded yet) are kept but not counted.
+  const planned = Object.entries(selected).filter(([id, quantity]) => quantity > 0 && data?.items.some(item => item.item_id === Number(id)));
+  const count = planned.reduce((sum, [, n]) => sum + n, 0);
+  const adjust = (id: number, delta: number) => updateAddDraft(locationId, d => ({ ...d, selected: { ...d.selected, [id]: Math.max(0, Math.min(9999, (d.selected[id] ?? 0) + delta)) } }));
   function save() {
     if (!data) return;
-    const entries = Object.entries(selected).filter(([, quantity]) => quantity > 0).map(([id, quantity]) => {
+    const entries = planned.map(([id, quantity]) => {
       const chosen = itemBuyers[Number(id)] ?? buyer;
       return { item_id: Number(id), quantity, buyer_id: chosen === "none" ? null : Number(chosen) };
     });
@@ -59,11 +62,12 @@ export function AddItemsToList() {
       } as unknown as FlattenedShoppingListItem] : [];
     })]);
     inBackground(() => api.post("/listEntries", { location_id: locationId, entries }), undo);
+    clearAddDraft(locationId);
     goBack(listPath);
   }
   const footer = <>
     <div className="catalog-footer-actions">
-      <Link className="btn btn-secondary catalog-create-footer" to={`/locations/${locationId}/items/new?returnToAdd=1`} aria-label="Create new item">
+      <Link className="btn btn-secondary catalog-create-footer" to={`/locations/${locationId}/items/new?returnToAdd=1${search.trim() ? "&name=" + encodeURIComponent(search.trim()) : ""}`} aria-label="Create new item">
         <Icon path={mdiPlusBoxOutline} size={19} color={colors.primary} /> New item
       </Link>
       <Button disabled={!count} onClick={save}>{count ? "Add " + count + (count === 1 ? " item" : " items") : "Select items"}</Button>
@@ -81,7 +85,8 @@ export function AddItemsToList() {
     {!!profile && <p className="hint">{profile.name}'s favourites appear first. Tap a star to save or remove one.</p>}
     <div className="section-header spaced-top">
       <h2 className="section-title">All items</h2>
-      <span className="muted small">{items.length} in catalog</span>
+      {count ? <button type="button" className="tool" onClick={() => clearAddDraft(locationId)}>Clear {count} selected</button>
+        : <span className="muted small">{items.length} in catalog</span>}
     </div>
     <InlineError message={error} />
     {!items.length && <ScreenState title={search ? "No matching items" : "Catalog empty"} description={search ? "Try another item name." : undefined} />}
@@ -97,7 +102,7 @@ export function AddItemsToList() {
           <span className="list-name">{item.name}</span>
           <span className="muted small">{money(item.price)}{item.section_name ? " / " + item.section_name : ""}</span>
         </Link>
-        <ChoiceField compact dropdown label={"Buyer for " + item.name} value={itemBuyers[item.item_id] ?? buyer} onChange={value => setItemBuyers(prev => ({ ...prev, [item.item_id]: value }))} options={buyers} />
+        <ChoiceField compact dropdown label={"Buyer for " + item.name} value={itemBuyers[item.item_id] ?? buyer} onChange={value => setItemBuyer(item.item_id, value)} options={buyers} />
         <div className="stepper">
           {quantity > 0 && <>
             <button type="button" className="step" aria-label={"Remove one " + item.name} onClick={() => adjust(item.item_id, -1)}><Icon path={mdiMinus} size={18} color={colors.primary} /></button>
@@ -116,9 +121,11 @@ export function ItemEditor() {
   const locationId = Number(params.locationId);
   const itemId = params.itemId ? Number(params.itemId) : undefined;
   const goBack = useGoBack();
-  const fallback = `/locations/${locationId}/${new URLSearchParams(window.location.search).has("returnToAdd") ? "add" : "list"}`;
+  const query = new URLSearchParams(window.location.search);
+  const fromAdd = query.has("returnToAdd");
+  const fallback = `/locations/${locationId}/${fromAdd ? "add" : "list"}`;
   const { data, loading, error, reload } = useScreenData<CatalogData | ItemData>(itemId ? "/catalog/" + itemId : "/catalog?location_id=" + locationId, false);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(() => itemId ? "" : query.get("name") ?? "");
   const [section, setSection] = useState("none");
   const [price, setPrice] = useState("");
   const [confirm, setConfirm] = useState(false);
@@ -155,7 +162,12 @@ export function ItemEditor() {
     };
     inBackground(async () => {
       if (itemId) { await api.patch("/catalog/" + itemId, payload); await saveImage(itemId); }
-      else await saveImage((await api.post<item>("/catalog", { ...payload, location_id: locationId })).item_id);
+      else {
+        const created = await api.post<item>("/catalog", { ...payload, location_id: locationId });
+        // A new item made while picking items is one the user plans to add.
+        if (fromAdd) selectNewItem(locationId, created.item_id);
+        await saveImage(created.item_id);
+      }
     });
     goBack(fallback);
   }
