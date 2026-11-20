@@ -18,6 +18,8 @@ import { startConnectionMonitor, useConnectionCheckOpen } from "./lib/connection
 import { logEvent, setLogProfile, startDeviceLog } from "./lib/deviceLog";
 import { logScreen, startActivityLog } from "./lib/activityLog";
 import { ConnectionCheck } from "./components/Connection";
+import { DevModeFloat } from "./components/DevMode";
+import { devModeGeneration, onDevModeChange, useDevMode } from "./lib/devMode";
 
 export default function App() {
   const Router = isNative ? HashRouter : BrowserRouter;
@@ -25,8 +27,10 @@ export default function App() {
 }
 
 function Shell() {
+  const devMode = useDevMode();
+  const generation = devModeGeneration();
   const server = useServer();
-  useNavigationPreload(server ? server.mode + originFor(server) : null);
+  useNavigationPreload(server ? server.mode + originFor(server) : devMode ? "dev" : null);
   const navigate = useNavigate();
   const location = useLocation();
   const [profile, setProfile] = useState<Profile | null>(readProfile);
@@ -35,16 +39,17 @@ function Shell() {
   const checkOpen = useConnectionCheckOpen();
   const serverKey = server ? server.mode + originFor(server) : null;
 
+  useEffect(() => onDevModeChange(() => { setProfile(readProfile()); }), []);
   useEffect(() => { startDeviceLog(); startActivityLog(); logEvent("info", "app-start"); }, []);
   useEffect(() => { setLogProfile(profile?.name); }, [profile]);
-  const view = !server ? (detecting ? "finding-server" : "server-settings") : serverOpen ? "server-settings" : !profile || location.pathname === "/profiles" ? "profile-picker" : undefined;
+  const view = !server && !devMode ? (detecting ? "finding-server" : "server-settings") : serverOpen ? "server-settings" : !profile || location.pathname === "/profiles" ? "profile-picker" : undefined;
   useEffect(() => { logScreen([view, checkOpen && "connection-check"].filter(Boolean).join(", ") || undefined); }, [location.pathname, location.search, location.hash, view, checkOpen]);
   // Each server gets a fresh check; the monitor reads the current server on every check.
   useEffect(() => {
-    if (!serverKey) return;
+    if (!serverKey || devMode) return;
     logEvent("info", "server-selected", { server: serverKey });
     return startConnectionMonitor();
-  }, [serverKey]);
+  }, [serverKey, devMode]);
 
   // First launch: use the first preset server that answers; ask only if none do.
   // Local goes first: it only answers on an emulator, where it is the direct path.
@@ -66,26 +71,24 @@ function Shell() {
     switchProfile: () => { navigate("/profiles"); },
   }, [profile, navigate]);
 
-  // Opening the picker keeps the current shopper until another is selected.
-  // Give it a history entry so browser swipes and Android Back can cancel it.
+  // On the home screen, let Android Back exit the app instead of replaying old history or jumping to /profiles.
   useEffect(() => {
-    if (!profile) { setRootBackHandler(null); return; }
+    if (!profile || location.pathname === "/") { setRootBackHandler(null); return; }
     setRootBackHandler(() => {
       if (canGoBack()) navigate(-1);
-      else if (location.pathname !== "/") navigate("/", { replace: true });
-      else navigate("/profiles");
+      else navigate("/", { replace: true });
     });
     return () => setRootBackHandler(null);
   }, [profile, location.pathname, navigate]);
 
-  if (!server && detecting) return <div className="screen"><ScreenState loading /></div>;
-  if (!server || serverOpen) return <ServerSettings onDone={server ? () => setServerOpen(false) : undefined} />;
-  // Remount screen data and the live-update socket when the server changes.
-  const key = server.mode + originFor(server);
+  if (!server && !devMode && detecting) return <div className="screen"><ScreenState loading /></div>;
+  if ((!server && !devMode) || serverOpen) return <><ServerSettings onDone={server || devMode ? () => setServerOpen(false) : undefined} /><DevModeFloat /></>;
+  // Remount screen data and the live-update socket when the server or dev mode changes.
+  const key = `${server ? server.mode + originFor(server) : "dev"}:${generation}`;
   // The connection check opens over the current screen so unsaved input survives.
   const check = checkOpen && <div className="screen-overlay"><ConnectionCheck onServer={() => setServerOpen(true)} /></div>;
-  if (!profile || location.pathname === "/profiles") return <><ProfilePicker key={key} onSelect={p => { rememberProfile(p); setProfile(p); navigate("/", { replace: true }); }} onServer={() => setServerOpen(true)} />{check}</>;
-  return <SessionContext.Provider value={session}><AppRoutes key={key} /><NoticeBar />{check}</SessionContext.Provider>;
+  if (!profile || location.pathname === "/profiles") return <><ProfilePicker key={key} onSelect={p => { rememberProfile(p); setProfile(p); if (location.pathname === "/profiles" && canGoBack()) navigate(-1); else navigate("/", { replace: true }); }} onServer={() => setServerOpen(true)} />{check}<DevModeFloat /></>;
+  return <SessionContext.Provider value={session}><AppRoutes key={key} /><NoticeBar />{check}<DevModeFloat /></SessionContext.Provider>;
 }
 
 function AppRoutes() {

@@ -41,8 +41,9 @@ v1Router.get("/all", async (req: Request, res: Response) => {
   const item_status = await prisma.item_status.findMany();
   const locations = await prisma.location.findMany();
   const shopping_lists = await prisma.shopping_list.findMany();
-  const users = await prisma.user.findMany();
-  res.send({ items, store_sections, item_in_list, item_price_historys, item_status, locations, shopping_lists, users });
+  const users = await prisma.user.findMany({ select: { user_id: true, name: true, role: true } });
+  const item_favorites = await prisma.item_favorite.findMany();
+  res.send({ items, store_sections, item_in_list, item_price_historys, item_status, locations, shopping_lists, users, item_favorites });
 });
 app.use(cors())
 // Devices queue their own logs while offline and upload them here later. This
@@ -65,11 +66,14 @@ const noteDatabase = (up: boolean, error?: unknown) => {
   else log("error", "database-down", errorDetails(error));
 };
 const checkDatabase = databaseProbe(() => prisma.$queryRaw`SELECT 1`);
+// Lets the restart command confirm the new process and build are serving.
+const startedAt = new Date().toISOString();
+const buildStamp = (() => { try { return fs.readFileSync(path.join(process.cwd(), "dist/.build-stamp"), "utf8").trim(); } catch { return null; } })();
 app.get('/health', async (_req, res) => {
   try {
     await checkDatabase();
     noteDatabase(true);
-    res.json({ status: 'ok', app: 'grocerypro' });
+    res.json({ status: 'ok', app: 'grocerypro', started: startedAt, build: buildStamp });
   } catch (error) {
     noteDatabase(false, error);
     res.setHeader('Retry-After', '3');

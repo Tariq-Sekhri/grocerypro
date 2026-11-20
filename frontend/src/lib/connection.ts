@@ -4,6 +4,7 @@ import { apiOrigin, describeServer, getServer, isNative } from "./server";
 import { appActive, onAppStateChange } from "./appState";
 import { screenDataCache } from "./priorityDataCache";
 import { logEvent, timeoutSignal, uploadLogs } from "./deviceLog";
+import { isDevMode, onDevModeChange } from "./devMode";
 
 /**
  * Works out why the server cannot be reached, step by step: the phone's
@@ -112,6 +113,7 @@ let again = false;
 
 /** Runs a check now (or right after the current one) and updates the state. */
 export function checkConnection(): Promise<void> {
+  if (isDevMode()) return Promise.resolve();
   if (running) { again = true; return running; }
   running = (async () => {
     do {
@@ -171,6 +173,7 @@ function checkSoon(delay = 300) {
 
 /** API requests report how they went: failures start a check, successes clear a problem. */
 export function reportRequest(ok: boolean, reachedServer: boolean, status?: number) {
+  if (isDevMode()) return;
   if (ok) {
     if (state.phase === "problem" && !running) checkSoon(0);
     return;
@@ -179,14 +182,28 @@ export function reportRequest(ok: boolean, reachedServer: boolean, status?: numb
 }
 
 /** Live-update socket errors usually mean the same thing as failed requests. */
-export const reportSocketError = () => { if (state.phase !== "problem") checkSoon(1000); };
+export const reportSocketError = () => { if (!isDevMode() && state.phase !== "problem") checkSoon(1000); };
 
 export const openTailscale = () => nativeNetwork ? NetworkStatus.openTailscale().catch(() => {}) : Promise.resolve();
 export const canOpenTailscale = nativeNetwork;
 
 let stop: (() => void) | null = null;
+onDevModeChange(enabled => {
+  if (enabled) {
+    stop?.();
+    setState({
+      ...state,
+      phase: "ok",
+      checking: false,
+      problem: null,
+      steps: { internet: true, tailscale: null, server: true, database: true },
+    });
+  }
+});
+
 /** Starts watching: checks now, on resume, on network changes and while a problem lasts. */
 export function startConnectionMonitor() {
+  if (isDevMode()) return () => {};
   if (stop) return stop;
   const online = () => checkSoon(500);
   window.addEventListener("online", online);

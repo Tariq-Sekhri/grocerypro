@@ -1,6 +1,6 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { mdiCameraOutline, mdiFoodAppleOutline, mdiImageOutline, mdiMagnify, mdiMinus, mdiPlus, mdiPlusBoxOutline, mdiStar, mdiStarOutline, mdiTrashCanOutline } from "@mdi/js";
+import { mdiCameraOutline, mdiClose, mdiFoodAppleOutline, mdiImageOutline, mdiMagnify, mdiMinus, mdiPlus, mdiPlusBoxOutline, mdiStar, mdiStarOutline, mdiTrashCanOutline } from "@mdi/js";
 import type { item } from "@shared/prisma-types";
 import Icon from "../components/Icon";
 import { ItemThumb } from "../components/ItemImage";
@@ -15,8 +15,11 @@ import { useGoBack } from "../lib/navigation";
 import { useProfile } from "../lib/profile";
 import { prepareItemImage, rememberItemImage, useItemImage } from "../lib/itemImages";
 import { isNative } from "../lib/server";
-import { clearAddDraft, selectNewItem, updateAddDraft, useAddDraft } from "../lib/addDraft";
+import { clearAddDraft, readAddDraft, selectNewItem, updateAddDraft, useAddDraft } from "../lib/addDraft";
 import { buyerChoices, catalogFavorite, money, parsePrice, priceInput, sortedCatalog, validPrice, type CatalogData, type CatalogItem, type FlattenedShoppingListItem, type ItemData } from "../lib/grocery";
+
+// Remember scroll position per store so editing or deleting an item returns to the same spot.
+const catalogScrollTop = new Map<number, number>();
 
 export function AddItemsToList() {
   const locationId = Number(useParams().locationId);
@@ -28,12 +31,38 @@ export function AddItemsToList() {
   const draft = useAddDraft(locationId);
   const { search, itemBuyers, selected } = draft;
   const buyer = draft.buyer ?? (profile ? String(profile.user_id) : "none");
-  const setSearch = (value: string) => updateAddDraft(locationId, d => ({ ...d, search: value }));
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const restoredRef = useRef(false);
+  const setSearch = (value: string) => {
+    updateAddDraft(locationId, d => ({ ...d, search: value }));
+    const scroller = anchorRef.current?.closest(".scroll");
+    if (scroller) { scroller.scrollTop = 0; catalogScrollTop.set(locationId, 0); }
+  };
   const setBuyer = (value: string) => updateAddDraft(locationId, d => ({ ...d, buyer: value }));
   const setItemBuyer = (id: number, value: string) => updateAddDraft(locationId, d => ({ ...d, itemBuyers: { ...d.itemBuyers, [id]: value } }));
   const [favoriteOverrides, setFavoriteOverrides] = useState<Record<string, boolean>>({});
+  // Freeze favourite-first sort order for this visit so tapping a star never teleports the row away.
+  const sortKey = `${locationId}:${profile?.user_id ?? "none"}`;
+  const [sortFavorites, setSortFavorites] = useState<{ key: string; ids: Set<number> } | null>(null);
+  useEffect(() => {
+    if (!data || sortFavorites?.key === sortKey) return;
+    const ids = new Set(data.items.filter(item => profile ? item.favorite_user_ids?.includes(profile.user_id) : false).map(item => item.item_id));
+    setSortFavorites({ key: sortKey, ids });
+  }, [data, profile, sortKey, sortFavorites?.key]);
   // Fresh catalog data already reflects saved favourites and removed items.
   useEffect(() => { setFavoriteOverrides({}); }, [data]);
+  useLayoutEffect(() => {
+    const scroller = anchorRef.current?.closest(".scroll");
+    if (!scroller || !data) return;
+    if (!restoredRef.current) {
+      restoredRef.current = true;
+      const saved = catalogScrollTop.get(locationId);
+      if (saved) scroller.scrollTop = saved;
+    }
+    const onScroll = () => { catalogScrollTop.set(locationId, scroller.scrollTop); };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => { scroller.removeEventListener("scroll", onScroll); };
+  }, [data, locationId]);
   const isFavorite = (item: CatalogItem) => catalogFavorite(item, profile?.user_id ?? null, favoriteOverrides);
   function toggleFavorite(item: CatalogItem) {
     if (!profile) return;
@@ -47,6 +76,7 @@ export function AddItemsToList() {
   const adjust = (id: number, delta: number) => updateAddDraft(locationId, d => ({ ...d, selected: { ...d.selected, [id]: Math.max(0, Math.min(9999, (d.selected[id] ?? 0) + delta)) } }));
   function save() {
     if (!data) return;
+    const previousDraft = readAddDraft(locationId);
     const entries = planned.map(([id, quantity]) => {
       const chosen = itemBuyers[Number(id)] ?? buyer;
       return { item_id: Number(id), quantity, buyer_id: chosen === "none" ? null : Number(chosen) };
@@ -61,8 +91,12 @@ export function AddItemsToList() {
         status_name: ITEM_STATUS.NOT_IN_CART, regular_price: item.price, sort_order: null,
       } as unknown as FlattenedShoppingListItem] : [];
     })]);
-    inBackground(() => api.post("/listEntries", { location_id: locationId, entries }), undo);
+    inBackground(() => api.post("/listEntries", { location_id: locationId, entries }), () => {
+      undo();
+      updateAddDraft(locationId, () => previousDraft);
+    });
     clearAddDraft(locationId);
+    catalogScrollTop.delete(locationId);
     goBack(listPath);
   }
   const footer = <>
@@ -74,13 +108,19 @@ export function AddItemsToList() {
     </div>
   </>;
   if (!data) return <Page title="Add Items" back={listPath}><ScreenState loading={loading} title="Couldn't load the catalog" description={error ?? undefined} action={loading ? undefined : "Try again"} onAction={reload} /></Page>;
-  const items = sortedCatalog(data.items, search, profile?.user_id ?? null, favoriteOverrides);
+  const pinnedFavs = sortFavorites?.key === sortKey ? sortFavorites.ids : undefined;
+  const items = sortedCatalog(data.items, search, profile?.user_id ?? null, favoriteOverrides, pinnedFavs);
   const buyers = buyerChoices(data.buyers);
   return <Page title="Add Items" back={listPath} footer={footer}>
-    <label className="search">
-      <Icon path={mdiMagnify} size={22} color={colors.muted} />
-      <input aria-label="Search items" placeholder="Find an item" value={search} onChange={e => setSearch(e.target.value)} type="search" autoComplete="off" />
-    </label>
+    <div className="catalog-sticky-search" ref={anchorRef}>
+      <label className="search">
+        <Icon path={mdiMagnify} size={22} color={colors.muted} />
+        <input aria-label="Search items" placeholder="Find an item" value={search} onChange={e => setSearch(e.target.value)} type="search" autoComplete="off" />
+        {!!search && <button type="button" className="search-clear" aria-label="Clear search" onClick={() => setSearch("")}>
+          <Icon path={mdiClose} size={18} color={colors.muted} />
+        </button>}
+      </label>
+    </div>
     <ChoiceField label="Buying for" value={buyer} onChange={setBuyer} options={buyers} dropdown />
     {!!profile && <p className="hint">{profile.name}'s favourites appear first. Tap a star to save or remove one.</p>}
     <div className="section-header spaced-top">
@@ -172,7 +212,11 @@ export function ItemEditor() {
     goBack(fallback);
   }
   function remove() {
-    inBackground(() => api.delete("/item/" + itemId));
+    const undo = patchCached<CatalogData>("/catalog?location_id=" + locationId, catalog => ({
+      ...catalog,
+      items: catalog.items.filter(candidate => candidate.item_id !== itemId),
+    }));
+    inBackground(() => api.delete("/item/" + itemId), undo);
     setConfirm(false);
     goBack(fallback);
   }

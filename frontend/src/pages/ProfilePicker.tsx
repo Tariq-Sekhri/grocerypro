@@ -10,6 +10,9 @@ import { readProfile, rememberProfile, type Profile } from "../lib/profile";
 import { onConnectionRecovered, useConnection } from "../lib/connection";
 import { ConnectionBanner } from "../components/Connection";
 import { useBackHandler } from "../lib/navigation";
+import { DevModeIcon } from "../components/DevMode";
+import { useDevMode } from "../lib/devMode";
+import { enterDevMode, exitDevMode } from "../lib/devStore";
 
 const roles = [
   { value: "member", label: "Family member" },
@@ -44,6 +47,8 @@ function AddProfileDialog({ first, onClose, onAdded }: { first: boolean; onClose
 }
 
 export default function ProfilePicker({ onSelect, onServer }: { onSelect: (profile: Profile) => void; onServer: () => void }) {
+  const devMode = useDevMode();
+  const [devBusy, setDevBusy] = useState(false);
   const server = useServer();
   const connection = useConnection();
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -111,6 +116,14 @@ export default function ProfilePicker({ onSelect, onServer }: { onSelect: (profi
       <Icon path={mdiServerNetwork} size={18} color={colors.primary} />
       <span>{server ? describeServer(server) : "Choose a server"}</span>
     </button>}
+    <button type="button" className={`server-link${devMode ? " dev-mode-pill" : ""}`} disabled={devBusy} onClick={() => {
+      if (devMode) { exitDevMode(); return; }
+      setDevBusy(true);
+      void enterDevMode().finally(() => setDevBusy(false));
+    }}>
+      <DevModeIcon size={18} />
+      <span>{devBusy ? "Loading..." : devMode ? "Exit dev mode & discard" : "Dev mode"}</span>
+    </button>
   </div></main>
     {adding && <AddProfileDialog first={!profiles.length} onClose={() => setAdding(false)} onAdded={profile => { setProfiles(prev => [...prev, profile]); setAdding(false); }} />}
     <ConfirmAction open={!!removing} busy={removeBusy} title={`Delete ${removing?.name ?? "profile"}?`}

@@ -1,5 +1,6 @@
 import type { item, location, shopping_list, store_section } from "@shared/prisma-types";
 import type FlattenedShoppingListItem from "@shared/types/FlattenedShoppingListItem";
+import { isDevMode, onDevModeChange } from "./devMode";
 
 export type { location, FlattenedShoppingListItem };
 export type Buyer = { user_id: number; name: string | null; role?: string };
@@ -43,21 +44,39 @@ export function catalogFavorite(item: CatalogItem, userId: number | null, overri
   return userId !== null && (overrides[userId + ":" + item.item_id] ?? item.favorite_user_ids?.includes(userId) ?? false);
 }
 
-export function sortedCatalog(items: CatalogItem[], search: string, userId: number | null, overrides: Record<string, boolean> = {}) {
-  return items.filter(item => (item.name ?? "").toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => Number(catalogFavorite(b, userId, overrides)) - Number(catalogFavorite(a, userId, overrides))
-      || (a.name ?? "").localeCompare(b.name ?? ""));
+export function sortedCatalog(
+  items: CatalogItem[],
+  search: string,
+  userId: number | null,
+  overrides: Record<string, boolean> = {},
+  pinnedFavoriteIds?: ReadonlySet<number>,
+) {
+  const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const isFav = (item: CatalogItem) => pinnedFavoriteIds ? pinnedFavoriteIds.has(item.item_id) : catalogFavorite(item, userId, overrides);
+  return items.filter(item => {
+    if (!words.length) return true;
+    const name = (item.name ?? "").toLowerCase();
+    return words.every(word => name.includes(word));
+  }).sort((a, b) => Number(isFav(b)) - Number(isFav(a)) || (a.name ?? "").localeCompare(b.name ?? ""));
 }
 
 const filterKey = (locationId: number) => "grocerypro.filters." + locationId;
 export const defaultFilters: ListFilters = { buyer: "all", section: "all" };
+const devFilters = new Map<number, ListFilters>();
+onDevModeChange(() => { devFilters.clear(); });
 
-/** List filters last for the session, per store, like the old navigation params. */
-export function loadFilters(locationId: number): ListFilters {
+function loadStoredFilters(locationId: number): ListFilters {
   try { return { ...defaultFilters, ...JSON.parse(sessionStorage.getItem(filterKey(locationId)) ?? "{}") }; }
   catch { return defaultFilters; }
 }
+
+/** List filters last for the session, per store, like the old navigation params. */
+export function loadFilters(locationId: number): ListFilters {
+  if (isDevMode()) return devFilters.get(locationId) ?? loadStoredFilters(locationId);
+  return loadStoredFilters(locationId);
+}
 export function saveFilters(locationId: number, filters: ListFilters) {
+  if (isDevMode()) { devFilters.set(locationId, filters); return; }
   sessionStorage.setItem(filterKey(locationId), JSON.stringify(filters));
 }
 

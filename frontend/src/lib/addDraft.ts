@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { isDevMode, onDevModeChange } from "./devMode";
 
 /**
  * The items picked on Add Items for one store, kept on the device until they
@@ -18,9 +19,15 @@ export type AddDraft = {
 const empty: AddDraft = { selected: {}, itemBuyers: {}, search: "" };
 const key = (locationId: number) => `grocerypro.addDraft.${locationId}`;
 const cache = new Map<number, AddDraft>();
+const devCache = new Map<number, AddDraft>();
 const listeners = new Set<() => void>();
 
-export function readAddDraft(locationId: number): AddDraft {
+onDevModeChange(() => {
+  devCache.clear();
+  listeners.forEach(listener => listener());
+});
+
+function readStoredAddDraft(locationId: number): AddDraft {
   const cached = cache.get(locationId);
   if (cached) return cached;
   let draft = empty;
@@ -32,9 +39,26 @@ export function readAddDraft(locationId: number): AddDraft {
   return draft;
 }
 
+export function readAddDraft(locationId: number): AddDraft {
+  if (isDevMode()) {
+    const cached = devCache.get(locationId);
+    if (cached) return cached;
+    const initial = readStoredAddDraft(locationId);
+    const copy: AddDraft = { ...initial, selected: { ...initial.selected }, itemBuyers: { ...initial.itemBuyers } };
+    devCache.set(locationId, copy);
+    return copy;
+  }
+  return readStoredAddDraft(locationId);
+}
+
 export function updateAddDraft(locationId: number, change: (draft: AddDraft) => AddDraft) {
   const next = change(readAddDraft(locationId));
   next.selected = Object.fromEntries(Object.entries(next.selected).filter(([, quantity]) => quantity > 0));
+  if (isDevMode()) {
+    devCache.set(locationId, next);
+    listeners.forEach(listener => listener());
+    return;
+  }
   cache.set(locationId, next);
   try {
     const blank = !Object.keys(next.selected).length && !Object.keys(next.itemBuyers).length && next.buyer === undefined && !next.search;

@@ -12,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:setup": "tsx scripts/setup-db.ts",
     "logs": "node scripts/logs.cjs",
-    "replay": "node scripts/replay.cjs"
+    "replay": "node scripts/replay.cjs",
+    "restart": "node scripts/restart.cjs"
   },
   "keywords": [],
   "author": "Tariq Sekhri",

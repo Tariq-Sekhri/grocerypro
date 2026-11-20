@@ -1,3 +1,8 @@
+import { isDevMode, onDevModeChange } from "./devMode";
+
+const devCache = new Map<string, unknown>();
+onDevModeChange(() => { devCache.clear(); });
+
 /** Active lists, locations, and store names are cached per server/store. */
 export function shoppingListCacheKey(origin: string, path: string): string | null {
   const prefix = /^\/shoppingList\/active\?location_id=\d+$/.test(path) ? "grocerypro.shopping-list.v1:"
@@ -9,7 +14,9 @@ export function shoppingListCacheKey(origin: string, path: string): string | nul
 export function readShoppingListCache<T>(key: string | null): T | null {
   if (!key) return null;
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
+    const value: unknown = isDevMode()
+      ? (devCache.get(key) ?? null)
+      : JSON.parse(localStorage.getItem(key) ?? "null");
     if (key.startsWith("grocerypro.locations.v1:")) {
       return Array.isArray(value) && value.every(isLocation) ? value as T : null;
     }
@@ -36,6 +43,7 @@ function isLocation(value: unknown): boolean {
 
 export function writeShoppingListCache(key: string | null, data: unknown): void {
   if (!key) return;
+  if (isDevMode()) { devCache.set(key, data); return; }
   try { localStorage.setItem(key, JSON.stringify(data)); }
   catch { /* A full or unavailable cache must not block the server's list. */ }
 }

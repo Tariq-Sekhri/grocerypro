@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { App } from "@capacitor/app";
 import { apiOrigin, isNative } from "./server";
+import { isDevMode } from "./devMode";
 
 /**
  * Problems and user activity (see activityLog.ts) are recorded on the device
@@ -33,6 +34,7 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 export function flushLog() {
   clearTimeout(saveTimer);
   saveTimer = undefined;
+  if (isDevMode()) return;
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); }
   catch { entries = entries.slice(-Math.floor(MAX_ENTRIES / 2)); }
 }
@@ -65,6 +67,7 @@ const sameKind = (a: Entry, b: Omit<Entry, "seq" | "time">) =>
  * merge: false because every touch matters for replaying a session.
  */
 export function logEvent(level: LogLevel, event: string, details: Record<string, unknown> = {}, { merge = true } = {}) {
+  if (isDevMode()) return;
   const time = new Date().toISOString();
   const next = { level, event, ...(profile ? { profile } : {}), ...details };
   const repeat = merge ? entries.slice(-6).reverse().find(entry => sameKind(entry, next)) : undefined;
@@ -88,6 +91,7 @@ let uploading: Promise<boolean> | null = null;
 
 /** Sends queued entries to the server and removes the ones it stored. Never throws. */
 export function uploadLogs(): Promise<boolean> {
+  if (isDevMode()) return Promise.resolve(true);
   if (uploading) return uploading;
   if (!entries.length) return Promise.resolve(true);
   uploading = (async () => {

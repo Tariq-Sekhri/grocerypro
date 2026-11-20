@@ -4,6 +4,8 @@ import { shoppingListCacheKey, writeShoppingListCache } from "./shoppingListCach
 import { connectionProblemMessage, reportRequest } from "./connection";
 import { logEvent } from "./deviceLog";
 import { readProfile } from "./profile";
+import { isDevMode } from "./devMode";
+import { devRequest } from "./devStore";
 
 export class ApiError extends Error {
   constructor(message: string, readonly status?: number, readonly network = false) { super(message); }
@@ -16,6 +18,19 @@ const UPLOAD_TIMEOUT_MS = 60000;
 const pendingWrites = new Set<Promise<unknown>>();
 
 function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal, origin = apiOrigin(), priority: RequestPriority = "auto"): Promise<T> {
+  if (isDevMode()) {
+    return devRequest<T>(method, path, body, signal).then(
+      result => {
+        if (method !== "GET") screenDataCache.invalidate();
+        return result;
+      },
+      err => {
+        if (err instanceof DOMException && err.name === "AbortError") throw err;
+        const status = typeof (err as { status?: unknown })?.status === "number" ? (err as { status: number }).status : undefined;
+        throw new ApiError(err instanceof Error ? err.message : "The server could not complete the request.", status);
+      },
+    );
+  }
   if (method === "GET") {
     return pendingWrites.size ? Promise.allSettled([...pendingWrites]).then(() => send<T>(method, path, body, signal, origin, priority)) : send<T>(method, path, body, signal, origin, priority);
   }
@@ -121,6 +136,7 @@ export function errorMessage(error: unknown) {
 
 /** Checks whether a Grocery Pro backend answers at an origin ("" = same origin). */
 export async function checkServer(origin: string): Promise<{ ok: boolean; message: string }> {
+  if (isDevMode()) return { ok: true, message: "Dev mode" };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
   try {

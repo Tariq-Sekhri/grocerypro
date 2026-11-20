@@ -2,6 +2,8 @@ import { useEffect, useSyncExternalStore } from "react";
 import { api } from "./api";
 import { apiOrigin } from "./server";
 import { subscribeToLiveUpdates } from "./liveUpdates";
+import { isDevMode, useDevMode } from "./devMode";
+import { getDevImageUrl, rememberDevImage } from "./devStore";
 
 /**
  * Item images are downloaded once and kept on the device in IndexedDB, keyed by
@@ -69,7 +71,7 @@ function load(origin: string, path: string) {
   if (urls.has(key)) return;
   if (!loads.has(key)) {
     loads.set(key, (async () => {
-      const blob = await readStored(key) ?? await download(origin, path);
+      const blob = await readStored(key) ?? (isDevMode() ? null : await download(origin, path));
       if (blob && !urls.has(key)) { urls.set(key, URL.createObjectURL(blob)); emit(); }
     })().finally(() => loads.delete(key)));
   }
@@ -77,14 +79,17 @@ function load(origin: string, path: string) {
 
 /** Device URL for an item's image; null while it loads, or when the item has none. */
 export function useItemImage(path: string | null | undefined): string | null {
+  const devMode = useDevMode();
+  const devUrl = devMode && path ? getDevImageUrl(path) : null;
   const key = path ? serverBase() + path : null;
   const url = useSyncExternalStore(subscribe, () => key ? urls.get(key) ?? null : null);
-  useEffect(() => { if (path) load(serverBase(), path); }, [path]);
-  return url;
+  useEffect(() => { if (path && !devUrl) load(serverBase(), path); }, [path, devUrl, devMode]);
+  return devUrl ?? url;
 }
 
 /** Keeps a just-uploaded image so this device does not download it again. */
 export function rememberItemImage(path: string, blob: Blob) {
+  if (isDevMode()) { rememberDevImage(path, blob); return; }
   void writeStored(serverBase(), path, blob);
 }
 
@@ -93,6 +98,7 @@ let syncAgain = false;
 
 /** Downloads images this device lacks and deletes ones the server no longer uses. */
 export function syncItemImages(): Promise<void> {
+  if (isDevMode()) return Promise.resolve();
   if (syncing) { syncAgain = true; return syncing; }
   syncing = (async () => {
     do {

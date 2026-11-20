@@ -63,6 +63,19 @@ if (!process.argv.includes('--stop')) lock.listen(socket, async () => {
   log('Boot supervisor started');
   launch('mysql', 'run-mysql.cjs');
   launch('backend', 'run-pm2.cjs');
+  // The supervisor runs as SYSTEM, so a normal user cannot stop its children.
+  // Writing .geopro/restart-backend (npm run restart in backend) asks it to
+  // restart the API gracefully; MySQL is left running.
+  const restartRequest = path.join(runtime, 'restart-backend');
+  setInterval(() => {
+    if (stopping || !fs.existsSync(restartRequest)) return;
+    try { fs.unlinkSync(restartRequest); } catch { return; }
+    const api = children.get('backend');
+    log('Restart requested; restarting API');
+    if (api?.connected) api.send('shutdown');
+    else api?.kill();
+    if (api) setTimeout(() => { if (children.get('backend') === api) api.kill(); }, 15000);
+  }, 1000);
   let failures = 0;
   let reportedReady = false;
   while (!stopping) {

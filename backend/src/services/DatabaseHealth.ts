@@ -1,5 +1,5 @@
 /** Bound health checks without adding more queries when the DB pool is stuck. */
-export function databaseProbe(query: () => Promise<unknown>, timeoutMs = 3000) {
+export function databaseProbe(query: () => Promise<unknown>, timeoutMs = 5000) {
   let pending: Promise<void> | null = null;
   return async () => {
     if (!pending) {

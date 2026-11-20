@@ -6,11 +6,15 @@ import { colors } from "../theme";
 import { checkServer } from "../lib/api";
 import { useBackHandler } from "../lib/navigation";
 import { normalizeServerUrl, originFor, serverOptions, setServer, useServer, type ServerChoice, type ServerMode } from "../lib/server";
+import { useDevMode } from "../lib/devMode";
+import { enterDevMode, exitDevMode } from "../lib/devStore";
 
 type Status = { state: "checking" } | { state: "done"; ok: boolean; message: string };
 
 /** Lets the client pick which Grocery Pro backend to use: Tailscale, Local or a custom address. */
 export default function ServerSettings({ onDone }: { onDone?: () => void }) {
+  const devMode = useDevMode();
+  const [devBusy, setDevBusy] = useState(false);
   const saved = useServer();
   const options = serverOptions();
   const [mode, setMode] = useState<ServerMode>(saved?.mode ?? "tailscale");
@@ -28,12 +32,14 @@ export default function ServerSettings({ onDone }: { onDone?: () => void }) {
 
   // Check every preset when the screen opens so it is obvious which one works.
   useEffect(() => {
+    if (devMode) return;
     for (const option of serverOptions()) if (option.mode !== "custom") void check(option.mode, "");
-  }, [check]);
+  }, [check, devMode]);
   useEffect(() => {
+    if (devMode) return;
     const timer = setTimeout(() => { void check("custom", custom); }, 500);
     return () => clearTimeout(timer);
-  }, [custom, check]);
+  }, [custom, check, devMode]);
 
   const customValid = !!normalizeServerUrl(custom);
   const selected = status[mode];
@@ -46,6 +52,17 @@ export default function ServerSettings({ onDone }: { onDone?: () => void }) {
       <div className="header-side" />
     </header>
     <main className="scroll"><div className="form">
+      <section className={`dev-mode-card${devMode ? " active" : ""}`}>
+        <div className="dev-mode-card-text">
+          <h2 className="dev-mode-card-title">Dev mode</h2>
+          <p className="dev-mode-card-description">Temporary changes, discarded on exit.</p>
+        </div>
+        <button type="button" className="chip" disabled={devBusy} onClick={() => {
+          if (devMode) { exitDevMode(); return; }
+          setDevBusy(true);
+          void enterDevMode().then(() => onDone?.()).finally(() => setDevBusy(false));
+        }}>{devBusy ? "Loading..." : devMode ? "Exit & discard" : "Enter"}</button>
+      </section>
       <div className="server-options" role="radiogroup" aria-label="Server">
         {options.map(option => {
           const s = status[option.mode];

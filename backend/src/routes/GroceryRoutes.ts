@@ -13,6 +13,7 @@ function fail(res: express.Response, message: string, status = 400) { res.status
 router.get("/profiles", async (_req, res) => {
   res.json(await prisma.user.findMany({ select: { user_id: true, name: true, role: true }, orderBy: { user_id: "asc" } }));
 });
+const txOptions = { maxWait: 10000, timeout: 15000 };
 const profileSelect = { user_id: true, name: true, role: true } as const;
 const roleSchema = z.enum(["admin", "member", "shared"]);
 /** The acting profile from X-Profile-Id, when it is an admin. Profiles have no passwords, so this guards against mistakes, not a hostile device. */
@@ -47,7 +48,7 @@ router.delete("/profiles/:id", async (req, res) => {
     await tx.item_favorite.deleteMany({ where: { user_id: id.data } });
     await tx.user.delete({ where: { user_id: id.data } });
     return { profile };
-  });
+  }, txOptions);
   if ("error" in result) { fail(res, result.error!, result.status); return; }
   res.json(result.profile);
 });
@@ -86,7 +87,7 @@ router.post("/catalog", async (req, res) => {
     const created = await tx.item.create({ data });
     if (price !== null) await tx.item_price_history.create({ data: { item_id: created.item_id, price, effective_date: new Date() } });
     return created;
-  });
+  }, txOptions);
   res.status(201).json(item);
 });
 router.get("/catalog/:id", async (req, res) => {
@@ -109,7 +110,7 @@ router.patch("/catalog/:id", async (req, res) => {
     const previous = await tx.item_price_history.findFirst({ where: { item_id: id.data }, orderBy: { item_price_history_id: "desc" } });
     if (price !== null && previous?.price !== price) await tx.item_price_history.create({ data: { item_id: id.data, price, effective_date: new Date() } });
     return ret;
-  });
+  }, txOptions);
   res.json(updated);
 });
 router.post("/listEntries", async (req, res) => {
@@ -131,16 +132,24 @@ router.post("/listEntries", async (req, res) => {
       list = await tx.shopping_list.findFirst({ where: { shopping_list_id: list.shopping_list_id, completed_at: null } });
     }
     if (!list) list = await tx.shopping_list.create({ data: { location_id } });
-    const status = await tx.item_status.findUnique({ where: { name: "not_in_cart" } });
+    const [status, existingRows] = await Promise.all([
+      tx.item_status.findUnique({ where: { name: "not_in_cart" } }),
+      tx.item_in_list.findMany({ where: { shopping_list_id: list.shopping_list_id, item_id: { in: itemIds } } }),
+    ]);
+    const existingByKey = new Map(existingRows.map(row => [`${row.item_id}:${row.buyer_id ?? "null"}`, row]));
+    const toCreate: { item_id: number; quantity: number; buyer_id: number | null; shopping_list_id: number; status_id: number | null }[] = [];
     for (const entry of entries) {
-      const existing = await tx.item_in_list.findFirst({ where: { shopping_list_id: list.shopping_list_id, item_id: entry.item_id, buyer_id: entry.buyer_id } });
+      const existing = existingByKey.get(`${entry.item_id}:${entry.buyer_id ?? "null"}`);
       if (existing) {
         if ((existing.quantity ?? 0) + entry.quantity > 9999) throw new Error("Quantity limit exceeded.");
         await tx.item_in_list.update({ where: { item_in_list_id: existing.item_in_list_id }, data: { quantity: (existing.quantity ?? 0) + entry.quantity } });
-      } else await tx.item_in_list.create({ data: { ...entry, shopping_list_id: list.shopping_list_id, status_id: status?.status_id ?? null } });
+      } else {
+        toCreate.push({ ...entry, shopping_list_id: list.shopping_list_id, status_id: status?.status_id ?? null });
+      }
     }
+    if (toCreate.length) await tx.item_in_list.createMany({ data: toCreate });
     return { shopping_list_id: list.shopping_list_id };
-  });
+  }, txOptions);
   res.status(201).json(result);
 });
 router.get("/listEntries/:id", async (req, res) => {
@@ -171,7 +180,7 @@ router.patch("/listEntries/:id/status", async (req, res) => {
     // Current versions ask the user to confirm and call POST /locations/:id/shoppingList/complete.
     if (!requested.data) await completeShoppingList(tx, entry.shopping_list_id!);
     return result;
-  });
+  }, txOptions);
   if (!updated) { fail(res, "Completed lists cannot be changed.", 409); return; }
   res.json(updated);
 });
@@ -183,7 +192,7 @@ router.post("/locations/:id/shoppingList/complete", async (req, res) => {
   const completed = await prisma.$transaction(async tx => {
     await lockShoppingList(tx, list.shopping_list_id);
     return completeShoppingList(tx, list.shopping_list_id);
-  });
+  }, txOptions);
   if (!completed) { fail(res, "Some items are still to get.", 409); return; }
   res.json(completed);
 });
@@ -216,7 +225,7 @@ router.patch("/listEntries/:id", async (req, res) => {
       }
     }
     return tx.item_in_list.update({ where: { item_in_list_id: id.data }, data: parsed.data });
-  });
+  }, txOptions);
   res.json(updated);
 });
 router.delete("/listEntries/:id", async (req, res) => {

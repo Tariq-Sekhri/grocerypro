@@ -234,7 +234,9 @@ function ListRow({ entries, locationId, aisles, onAisleCreated }: { entries: Fla
     </button>
     <ItemThumb path={first.image_path} />
     <span className="list-details">
-      <span className="list-name">{name}</span>
+      {merged
+        ? <button type="button" className="list-name list-name-trigger" onClick={() => setQuantityOpen(open => !open)}>{name}</button>
+        : <Link className="list-name list-name-trigger" to={`/entries/${first.item_in_list_id}`}>{name}</Link>}
       <div className="list-meta"><span className="list-aisle-picker" ref={aislePickerRef}>
         <button type="button" className="list-aisle-trigger" aria-label={`Set aisle, currently ${aisleName}`} aria-expanded={aisleOpen} onClick={() => { setAisleError(null); setAisleOpen(open => !open); }}>{aisleName}</button>
         {aisleOpen && <div className="aisle-picker-menu" aria-label="Choose an aisle">

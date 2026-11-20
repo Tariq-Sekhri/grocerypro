@@ -3,18 +3,27 @@ import { apiOrigin } from "./server";
 import { appActive, onAppStateChange } from "./appState";
 import { screenDataCache } from "./priorityDataCache";
 import { onConnectionRecovered, reportSocketError } from "./connection";
+import { isDevMode, onDevModeChange } from "./devMode";
 
 const listeners = new Set<() => void>();
 let socket: Socket | null = null;
 let cleanup: (() => void) | null = null;
 const notify = () => { screenDataCache.invalidate(); listeners.forEach(listener => listener()); };
 
-export const liveUpdatesConnected = () => socket?.connected === true;
+export const notifyLocalLiveUpdates = () => { notify(); };
+export const liveUpdatesConnected = () => isDevMode() || socket?.connected === true;
+
+onDevModeChange(enabled => {
+  if (enabled && cleanup) {
+    cleanup();
+    cleanup = null;
+  }
+});
 
 /** One connection shared by open screens, including reconnect/resume catch-up. */
 export function subscribeToLiveUpdates(listener: () => void) {
   listeners.add(listener);
-  if (!cleanup) {
+  if (!cleanup && !isDevMode()) {
     socket = io(apiOrigin() + "/grocery-sync", {
       autoConnect: false,
       transports: ["websocket", "polling"],
